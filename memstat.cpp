@@ -1,36 +1,21 @@
 #include "processinfo.h"
 #include "pageinfo.h"
 
+#include <cassert>
 #include <cstdio>
 #include <iostream>
 
-// from the kernel - instead of decrypting all that crap, let's just use it
+#include <linux/kernel-page-flags.h>
 
-#define PM_ENTRY_BYTES      sizeof(uint64_t)
-#define PM_STATUS_BITS      3
-#define PM_STATUS_OFFSET    (64 - PM_STATUS_BITS)
-#define PM_STATUS_MASK      (((1LL << PM_STATUS_BITS) - 1) << PM_STATUS_OFFSET)
-#define PM_STATUS(nr)       (((nr) << PM_STATUS_OFFSET) & PM_STATUS_MASK)
-#define PM_PSHIFT_BITS      6
-#define PM_PSHIFT_OFFSET    (PM_STATUS_OFFSET - PM_PSHIFT_BITS)
-#define PM_PSHIFT_MASK      (((1LL << PM_PSHIFT_BITS) - 1) << PM_PSHIFT_OFFSET)
-#define __PM_PSHIFT(x)      (((uint64_t) (x) << PM_PSHIFT_OFFSET) & PM_PSHIFT_MASK)
-#define PM_PFRAME_MASK      ((1LL << PM_PSHIFT_OFFSET) - 1)
-#define PM_PFRAME(x)        ((x) & PM_PFRAME_MASK)
-
-#define __PM_SOFT_DIRTY      (1LL)
-#define PM_PRESENT          PM_STATUS(4LL)
-#define PM_SWAP             PM_STATUS(2LL)
-#define PM_SOFT_DIRTY       __PM_PSHIFT(__PM_SOFT_DIRTY)
+#include "linux-pm-bits.h"
 
 static const uint maxProcessNameLength = 15; // with the way we use to read it
-static const uint pageFlagsSize = sizeof(uint64_t); // aka 64 bits aka 8 bytes
-static const uint pageShift = 12;
-static const uint pageSize = 4096;
 
 // from linux/Documentation/vm/pagemap.txt
-static const uint pageFlagCount = 23;
+static const uint pageFlagCount = 32;
 static const char *pageFlagNames[pageFlagCount] = {
+    // KPF_* flags from kernel-page-flags.h, documented in linux/Documentation/vm/pagemap.txt -
+    // those flags are specifically meant to be stable user-space API
     "LOCKED",
     "ERROR",
     "REFERENCED",
@@ -40,7 +25,7 @@ static const char *pageFlagNames[pageFlagCount] = {
     "ACTIVE",
     "SLAB",
     "WRITEBACK",
-    "RECLAIM",
+    "RECLAIM",  // 9 (10 for 1-based indexing)
     "BUDDY",
     "MMAP",
     "ANON",
@@ -50,14 +35,24 @@ static const char *pageFlagNames[pageFlagCount] = {
     "COMPOUND_TAIL",
     "HUGE",
     "UNEVICTABLE",
-    "HWPOISON",
+    "HWPOISON", // 19
     "NOPAGE",
     "KSM",
-    "THP"
+    "THP",
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    // flags from /proc/<pid>/pagemap, also documented in linux/Documentation/vm/pagemap.txt -
+    // we shift them around a bit) to clearly group them together and away from the other group
+    "SOFT_DIRTY",
+    "FILE_PAGE / SHARE_ANON", // 29
+    "SWAPPED",
+    "PRESENT"
 };
 
 using namespace std; // fuck the police :P
-
 
 static bool isFlagSet(uint64_t flags, uint testFlagShift)
 {
@@ -69,6 +64,7 @@ string printablePageFlags(uint64_t flags)
     string ret;
     for (uint i = 0; i < pageFlagCount; i++) {
         if (isFlagSet(flags, i)) {
+            assert(pageFlagNames[i]);
             ret += pageFlagNames[i];
             ret += ", ";
         }
@@ -88,8 +84,8 @@ int main(int argc, char *argv[])
 
     uint pid = strtoul(argv[1], nullptr, 10);
     if (!pid) {
-        string procName = string(argv[1]).substr(0, maxProcessNameLength);
-        for (const ProcessPid &pp : fetchProcessList()) {
+        const string procName = string(argv[1]).substr(0, maxProcessNameLength);
+        for (const ProcessPid &pp : readProcessList()) {
             if (pp.name == procName) {
                 pid = pp.pid;
                 break;
@@ -101,34 +97,40 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    PageInfo pageInfo(pid);
+    const vector<MappedRegion> &mappedRegions = pageInfo.mappedRegions();
+
+    uint64_t pagesWithZeroUseCount = 0;
     uint64_t vsz = 0;
+    uint64_t priv = 0;
+    uint64_t sharedFull = 0;
+    uint64_t sharedProp = 0;
+
     for (const MappedRegion &mr : mappedRegions) {
         vsz += mr.end - mr.start;
-    }
-
-    uint64_t pss = 0;
-    uint64_t pagesWithZeroUseCount = 0;
-    for (uint64_t pfn : seenPfns) {
-        uint64_t useCount = pageInfos.useCount(pfn);
-        uint64_t pageFlags = pageInfos.flags(pfn);
-        //cout << pfn << ": use count " << useCount << ", flags: " << printablePageFlags(pageInfos.flags(pfn)) << '\n';
-        // currently, use count is misreported as 0 for transparent hugepage tail (all after the first)
-        // pages - it should be 1
-        // ### not sure if fixable for kernel so we might have to do this forever: TODO also copy the flags
-        //     from the head page to all tail pages.
-        if (useCount == 1 || isFlagSet(pageFlags, KPF_THP)) {
-            // divisions are very slow even on modern CPUs
-            pss += 4096;
-        } else if (useCount == 0) {
-            //cout << "WHAT'S GOING ON HERE?\n";
-            pagesWithZeroUseCount++;
-        } else {
-            pss += 4096 / useCount;
+        uint64_t addr = mr.start;
+        for (size_t i = 0; i < mr.useCounts.size(); i++, addr += PageInfo::pageSize) {
+            uint64_t useCount = mr.useCounts[i];
+            uint64_t pageFlags = mr.combinedFlags[i];
+            //cout << pfn << ": use count " << useCount << ", flags: " << printablePageFlags(pageInfos.flags(pfn)) << '\n';
+            // currently, use count is misreported as 0 for transparent hugepage tail (all after the first)
+            // pages - it should be 1
+            // ### should we also copy flags from the head page to tail pages?
+            if (useCount == 1 || isFlagSet(pageFlags, KPF_THP)) {
+                // divisions are very slow even on modern CPUs
+                priv += PageInfo::pageSize;
+            } else if (useCount == 0) {
+                pagesWithZeroUseCount++;
+            } else {
+                sharedFull += PageInfo::pageSize;
+                sharedProp += PageInfo::pageSize / useCount;
+            }
         }
+        assert(addr == mr.end);
     }
 
-    cout << "VSZ or something is " << vsz / 1024 / 1024 << "MiB\n";
-    cout << "RSS or something is " << seenPfns.size() * 4096 / 1024 / 1024 << "MiB\n";
-    cout << "PSS or something is " << pss / 1024 / 1024 << "MiB\n";
+    cout << "VSZ is " << vsz / 1024 / 1024 << "MiB\n";
+    cout << "RSS is " << (priv + sharedFull) / 1024 / 1024 << "MiB\n";
+    cout << "PSS is " << (priv + sharedProp) / 1024 / 1024 << "MiB\n";
     cout << "number of pages with zero use count is " << pagesWithZeroUseCount << '\n';
 }

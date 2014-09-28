@@ -1,5 +1,7 @@
 #include "processinfo.h"
 
+#include <fstream>
+
 // POSIX specific, but this whole program only works on Linux anyway!
 #include <sys/types.h>
 #include <dirent.h>
@@ -9,7 +11,7 @@
 
 using namespace std;
 
-vector<ProcessPid> fetchProcessList()
+vector<ProcessPid> readProcessList()
 {
     vector<ProcessPid> ret;
 

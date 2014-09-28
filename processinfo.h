@@ -11,6 +11,8 @@ struct ProcessPid
     std::string name;
 };
 
-std::vector<ProcessPid> fetchProcessList();
+// Not a map because there are several ways to match with certain special cases like for shellscripts,
+// so the "natural" interface is a list on which one can do arbitrary matching.
+std::vector<ProcessPid> readProcessList();
 
 #endif // PROCESSINFO_H
