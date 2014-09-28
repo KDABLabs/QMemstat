@@ -13,6 +13,10 @@
 #include <sys/types.h>
 #include <dirent.h>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 // Linux specific, obviously
 #include <linux/kernel-page-flags.h>
 
@@ -60,15 +64,16 @@ static uint64_t pfnForPagemapEntry(uint64_t pmEntry)
 static vector<uint64_t> readPagemap(uint pid, vector<MappedRegionInternal> *mappedRegions)
 {
     vector<uint64_t> ret;
-    ostringstream pagemapName;
-    pagemapName << "/proc/" << pid << "/pagemap";
 
-    ifstream pagemap;
-    // disable buffering - the file is not regular at all!
-    pagemap.rdbuf()->pubsetbuf(nullptr, 0);
-    pagemap.open(pagemapName.str(), ifstream::binary);
-    if (!pagemap.is_open()) {
-        return ret; // TODO error msg
+    ostringstream pagemapNameStream;
+    pagemapNameStream << "/proc/" << pid << "/pagemap";
+    string pagemapName = pagemapNameStream.str();
+
+    // using POSIX API for reading isn't a huge win here, but it's somewhat faster and easier on
+    // the eyes than fstream API, too, so...
+    int pagemapFd = open(pagemapName.c_str(), O_RDONLY);
+    if (pagemapFd < 0) {
+        return ret; // TODO error reporting
     }
 
     for (MappedRegionInternal &region : *mappedRegions) {
@@ -77,9 +82,9 @@ static vector<uint64_t> readPagemap(uint pid, vector<MappedRegionInternal> *mapp
         region.useCounts.resize(pageCount);
         region.combinedFlags.resize(pageCount);
 
-        pagemap.seekg(region.start / PageInfo::pageSize * pageFlagsSize, pagemap.beg);
-        pagemap.read(reinterpret_cast<char *>(&region.pagemapEntries[0]),
-                     ((region.end - region.start) / PageInfo::pageSize * pageFlagsSize));
+        lseek64(pagemapFd, region.start / PageInfo::pageSize * pageFlagsSize, SEEK_SET);
+        read(pagemapFd, &region.pagemapEntries[0],
+             (region.end - region.start) / PageInfo::pageSize * pageFlagsSize);
 
         for (int i = 0; i < pageCount; i++) {
             const uint64_t pageBits = region.pagemapEntries[i];
@@ -94,6 +99,7 @@ static vector<uint64_t> readPagemap(uint pid, vector<MappedRegionInternal> *mapp
             // flags from /proc/kpageflags are added later
         }
     }
+    close(pagemapFd);
     return ret;
 }
 
@@ -119,6 +125,10 @@ struct PfnRange
     // largish process) - one would think that much larger values help because every read() is a syscall
     // and therefore expensive... but no, so let's just waste a little less memory from uselessly reading
     // gaps between PFN entries that we want.
+    // Note: one possible speed advantage of not reading too much is that the kernel must generate output
+    //       even for inexistent PFNs, which looks kind of but not very expensive to do. See Linux kernel
+    //       functions: kpagecount_read(), kpageflags_read() in linux/fs/proc/page.c
+    //       - note that copy_to_user also has a (not very large, some flag tests and memcpy) cost
     static const uint64_t maxGapSize = 16;
 
     uint64_t start;
@@ -139,6 +149,8 @@ static vector<PfnRange> rangifyPfns(vector<uint64_t> pfns)
     pfns.erase(unique(pfns.begin(), pfns.end()), pfns.end());
 
     // create reasonably sized chunks to read
+    // ### potential for performance improvement here: allocate all memory for ranges after creating them
+    //     and store an index into the global allocation in each PfnRange
     PfnRange range;
     range.start = pfns.front();
     range.last = pfns.front();
@@ -147,11 +159,8 @@ static vector<PfnRange> rangifyPfns(vector<uint64_t> pfns)
             // found a big gap, store previous range and start a new one
             ret.push_back(range);
             range.start = pfn;
-            range.last = pfn;
-        } else {
-            // expand range
-            range.last = pfn;
-        }
+         }
+         range.last = pfn;
     }
     ret.push_back(range);
 
@@ -163,13 +172,12 @@ static void readUseCountsAndFlags(vector<PfnRange> *pfnRanges)
 {
     uint64_t readTotal = 0;
 
-    ifstream kpagecount;
-    ifstream kpageflags;
-    kpagecount.rdbuf()->pubsetbuf(nullptr, 0);
-    kpageflags.rdbuf()->pubsetbuf(nullptr, 0);
-    kpagecount.open("/proc/kpagecount", ifstream::binary);
-    kpageflags.open("/proc/kpageflags", ifstream::binary);
-    if (!kpagecount.is_open() || !kpageflags.is_open()) {
+    // ### this function takes about half the CPU time of a whole data gathering pass when using
+    //     std::ifstream, and since we're tied to Linux anyway, just use Posix API (note: it only
+    //     shaves off about 30% of this function's execution time)
+    int kpagecountFd = open("/proc/kpagecount", O_RDONLY);
+    int kpageflagsFd = open("/proc/kpageflags", O_RDONLY);
+    if (kpagecountFd < 0 || kpageflagsFd < 0) {
         return; // TODO error reporting
     }
 
@@ -179,15 +187,15 @@ static void readUseCountsAndFlags(vector<PfnRange> *pfnRanges)
         range.m_useCounts.resize(count);
         range.m_flags.resize(count);
 
-        kpagecount.seekg(range.start * pageFlagsSize, kpagecount.beg);
-        kpageflags.seekg(range.start * pageFlagsSize, kpageflags.beg);
+        lseek64(kpagecountFd, range.start * pageFlagsSize, SEEK_SET);
+        lseek64(kpageflagsFd, range.start * pageFlagsSize, SEEK_SET);
 
-        kpagecount.read(reinterpret_cast<char *>(&range.m_useCounts[0]),
-                        count * pageFlagsSize);
-        kpageflags.read(reinterpret_cast<char *>(&range.m_flags[0]),
-                        count * pageFlagsSize);
+        read(kpagecountFd, &range.m_useCounts[0], count * pageFlagsSize);
+        read(kpageflagsFd, &range.m_flags[0], count * pageFlagsSize);
     }
 
+    close(kpagecountFd);
+    close(kpageflagsFd);
     // cout << "PFN ranges total read bytes: " << readTotal << '\n';
 }
 
@@ -240,32 +248,68 @@ PageInfo::PageInfo(uint pid)
     // - we can now retrieve flags and use count for a page at a given (virtual) address
     // - profit!
 
-    vector<MappedRegionInternal> mappedRegions = readMappedRegions(pid);
-    vector<PfnRange> pfnRanges = rangifyPfns(readPagemap(pid, &mappedRegions));
-    readUseCountsAndFlags(&pfnRanges);
-    PfnInfos pfnInfos(move(pfnRanges));
+    {
+        vector<MappedRegionInternal> mappedRegions = readMappedRegions(pid);
+        vector<PfnRange> pfnRanges = rangifyPfns(readPagemap(pid, &mappedRegions));
+        readUseCountsAndFlags(&pfnRanges);
+        PfnInfos pfnInfos(move(pfnRanges));
 
-    for (MappedRegionInternal &mappedRegion : mappedRegions) {
-        for (size_t i = 0; i < mappedRegion.pagemapEntries.size(); i++) {
-            const uint64_t pfn = pfnForPagemapEntry(mappedRegion.pagemapEntries[i]);
-            if (pfn) {
-                mappedRegion.useCounts[i] = uint32_t(pfnInfos.useCount(pfn));
-                mappedRegion.combinedFlags[i] = mappedRegion.combinedFlags[i] |
-                                                uint32_t(pfnInfos.flags(pfn));
+        for (MappedRegionInternal &mappedRegion : mappedRegions) {
+            for (size_t i = 0; i < mappedRegion.pagemapEntries.size(); i++) {
+                const uint64_t pfn = pfnForPagemapEntry(mappedRegion.pagemapEntries[i]);
+                if (pfn) {
+                    mappedRegion.useCounts[i] = uint32_t(pfnInfos.useCount(pfn));
+                    mappedRegion.combinedFlags[i] = mappedRegion.combinedFlags[i] |
+                                                    uint32_t(pfnInfos.flags(pfn));
+                }
             }
+
+            // don't need them anymore - this reduces peak memory allocation a bit
+            mappedRegion.pagemapEntries.clear();
+
+            MappedRegion publicMappedRegion = { mappedRegion.start, mappedRegion.end,
+                                                move(mappedRegion.useCounts), move(mappedRegion.combinedFlags) };
+            m_mappedRegions.push_back(move(publicMappedRegion));
         }
-
-        // don't need them anymore - this reduces peak memory allocation a bit
-        mappedRegion.pagemapEntries.clear();
-
-        MappedRegion publicMappedRegion;
-        publicMappedRegion.start = mappedRegion.start;
-        publicMappedRegion.end = mappedRegion.end;
-        publicMappedRegion.useCounts = move(mappedRegion.useCounts);
-        publicMappedRegion.combinedFlags = move(mappedRegion.combinedFlags);
-        m_mappedRegions.emplace_back(move(publicMappedRegion));
     }
 
     // this should be a no-op, but why not make sure... it make little performance difference.
     sort(m_mappedRegions.begin(), m_mappedRegions.end());
+
+    for (const MappedRegion &mappedRegion : m_mappedRegions) {
+        assert(mappedRegion.start < mappedRegion.end);
+    }
+
+    // ### regions can sometimes overlap(!), presumably due to data races in the kernel when watching
+    // a running process. Just assign any overlapping area to the first region to "claim" it, i.e. the
+    // one with the smallest start address.
+    for (int i = 1; i < m_mappedRegions.size(); i++) {
+        if (m_mappedRegions[i].start < m_mappedRegions[i - 1].end) {
+            cout << "correcting " << hex << m_mappedRegions[i - 1].start << " " << hex << m_mappedRegions[i - 1].end << " "
+                                  << m_mappedRegions[i].start << " " << hex << m_mappedRegions[i].end << endl;
+            uint32_t prevStart = m_mappedRegions[i].start;
+            m_mappedRegions[i].start = m_mappedRegions[i - 1].end;
+            if (m_mappedRegions[i].start >= m_mappedRegions[i].end) {
+                cout << "especially weird case" << endl;
+                // This renders the range inert... might be better to remove it altogether.
+                // Note that we move the end instead of the start, to maintain the invariant that the
+                // start address of region n+1 is >= end address of region n.
+                m_mappedRegions[i].end = m_mappedRegions[i].start;
+                m_mappedRegions[i].useCounts.clear();
+                m_mappedRegions[i].combinedFlags.clear();
+            } else if (!m_mappedRegions[i].useCounts.empty()) {
+                cout << "normally weird case" << endl;
+                const size_t delCount = (m_mappedRegions[i].start - prevStart) / pageSize;
+                m_mappedRegions[i].useCounts.erase(m_mappedRegions[i].useCounts.begin(),
+                                                   m_mappedRegions[i].useCounts.begin() + delCount);
+                m_mappedRegions[i].combinedFlags.erase(m_mappedRegions[i].combinedFlags.begin(),
+                                                       m_mappedRegions[i].combinedFlags.begin() + delCount);
+            } else {
+                cout << "weirdly unweird case?!" << endl;
+                cout << hex << m_mappedRegions[i].start << ":" << hex << m_mappedRegions[i].end << endl;
+            }
+            cout << "corrected  " << hex << m_mappedRegions[i - 1].start << hex << " " << m_mappedRegions[i - 1].end << " "
+                 << m_mappedRegions[i].start << " " << hex << m_mappedRegions[i].end << endl;
+        }
+    }
 }
