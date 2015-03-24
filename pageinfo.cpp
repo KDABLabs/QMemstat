@@ -18,8 +18,7 @@
 #include <unistd.h>
 
 // Linux specific, obviously
-#include <linux/kernel-page-flags.h>
-
+#include "kernel-page-flags.h"
 #include "linux-pm-bits.h"
 
 using namespace std;
