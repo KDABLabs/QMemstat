@@ -12,8 +12,8 @@
 
 struct MappedRegion
 {
-    uintptr_t start;
-    uintptr_t end;
+    uint64_t start;
+    uint64_t end;
     std::vector<uint32_t> useCounts;
     std::vector<uint32_t> combinedFlags;
     bool operator<(const MappedRegion &other) const { return start < other.start; }
