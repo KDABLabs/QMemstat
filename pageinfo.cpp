@@ -68,7 +68,7 @@ static vector<uint64_t> readPagemap(uint pid, vector<MappedRegionInternal> *mapp
     pagemapNameStream << "/proc/" << pid << "/pagemap";
     string pagemapName = pagemapNameStream.str();
 
-    // using POSIX API for reading isn't a huge win here, but it's somewhat faster and easier on
+    // using Linux API for reading isn't a huge win here, but it's somewhat faster and easier on
     // the eyes than fstream API, too, so...
     int pagemapFd = open(pagemapName.c_str(), O_RDONLY);
     if (pagemapFd < 0) {
@@ -81,9 +81,9 @@ static vector<uint64_t> readPagemap(uint pid, vector<MappedRegionInternal> *mapp
         region.useCounts.resize(pageCount);
         region.combinedFlags.resize(pageCount);
 
-        lseek64(pagemapFd, region.start / PageInfo::pageSize * pageFlagsSize, SEEK_SET);
-        read(pagemapFd, &region.pagemapEntries[0],
-             (region.end - region.start) / PageInfo::pageSize * pageFlagsSize);
+        pread64(pagemapFd, &region.pagemapEntries[0],
+                (region.end - region.start) / PageInfo::pageSize * pageFlagsSize,
+                region.start / PageInfo::pageSize * pageFlagsSize);
 
         for (int i = 0; i < pageCount; i++) {
             const uint64_t pageBits = region.pagemapEntries[i];
@@ -105,20 +105,30 @@ static vector<uint64_t> readPagemap(uint pid, vector<MappedRegionInternal> *mapp
 // PFN: page frame number, a kind of unique identifier inside the kernel paging subsystem
 struct PfnRange
 {
-    uint64_t useCount(uint64_t pfn) const
+    uint64_t useCount(uint64_t *buffer, uint64_t pfn) const
     {
         assert(pfn >= start && pfn <= last);
-        return m_useCounts[pfn - start];
+        return buffer[m_useCountsBufferOffset + pfn - start];
     }
 
-    uint64_t flags(uint64_t pfn) const
+    uint64_t flags(uint64_t *buffer, uint64_t pfn) const
     {
         assert(pfn >= start && pfn <= last);
-        return m_flags[pfn - start];
+        return buffer[m_flagsBufferOffset + pfn - start];
     }
 
     bool operator<(const PfnRange &other) const { return last < other.last; }
+    // comparing pfn to last so lower_bound immediately finds the right range; same above for consistency
     bool operator<(uint64_t pfn) const { return last < pfn; }
+
+    void allocBufferSpace(size_t *bufferPos)
+    {
+        const size_t count = last - start + 1;
+        m_useCountsBufferOffset = *bufferPos;
+        *bufferPos += count;
+        m_flagsBufferOffset = *bufferPos;
+        *bufferPos += count;
+    }
 
     // maxGapSize has been determined empirically (basically watching "time" output when mapping some
     // largish process) - one would think that much larger values help because every read() is a syscall
@@ -132,8 +142,8 @@ struct PfnRange
 
     uint64_t start;
     uint64_t last;
-    vector<uint64_t> m_useCounts; // for consistency...
-    vector<uint64_t> m_flags; // disambiguate from method name, yuck
+    size_t m_useCountsBufferOffset;
+    size_t m_flagsBufferOffset;
 };
 
 static vector<PfnRange> rangifyPfns(vector<uint64_t> pfns)
@@ -147,69 +157,52 @@ static vector<PfnRange> rangifyPfns(vector<uint64_t> pfns)
     // remove duplicates
     pfns.erase(unique(pfns.begin(), pfns.end()), pfns.end());
 
-    // create reasonably sized chunks to read
-    // ### potential for performance improvement here: allocate all memory for ranges after creating them
-    //     and store an index into the global allocation in each PfnRange
+    // create reasonably sized ranges to read
+    // ### Optimization: allocate memory for all ranges en bloc and store offsets into the
+    //     allocated memory in the ranges. This is a surprisingly large performance win -
+    //     it reduces the time for the whole PageInfo generation by roughly 40%.
+    //     Benefits are cache locality, one less layer of indirection, avoidance of malloc() and
+    //     free() calls, and avoidance of vector<uint64_t>::resize() uselessly initializing data.
+    size_t rangesStoragePos = 0;
     PfnRange range;
     range.start = pfns.front();
     range.last = pfns.front();
     for (uint64_t pfn : pfns) {
         if (pfn > range.last + PfnRange::maxGapSize) {
             // found a big gap, store previous range and start a new one
+            range.allocBufferSpace(&rangesStoragePos);
             ret.push_back(range);
             range.start = pfn;
          }
          range.last = pfn;
     }
+    range.allocBufferSpace(&rangesStoragePos);
     ret.push_back(range);
 
     return ret;
-}
-
-// read kpagemap and kpagecount
-static void readUseCountsAndFlags(vector<PfnRange> *pfnRanges)
-{
-    uint64_t readTotal = 0;
-
-    // ### this function takes about half the CPU time of a whole data gathering pass when using
-    //     std::ifstream, and since we're tied to Linux anyway, just use Posix API (note: it only
-    //     shaves off about 30% of this function's execution time)
-    int kpagecountFd = open("/proc/kpagecount", O_RDONLY);
-    int kpageflagsFd = open("/proc/kpageflags", O_RDONLY);
-    if (kpagecountFd < 0 || kpageflagsFd < 0) {
-        return; // TODO error reporting
-    }
-
-    for (PfnRange &range : *pfnRanges) {
-        size_t count = range.last - range.start + 1;
-        readTotal += count * 2 * pageFlagsSize;
-        range.m_useCounts.resize(count);
-        range.m_flags.resize(count);
-
-        lseek64(kpagecountFd, range.start * pageFlagsSize, SEEK_SET);
-        lseek64(kpageflagsFd, range.start * pageFlagsSize, SEEK_SET);
-
-        read(kpagecountFd, &range.m_useCounts[0], count * pageFlagsSize);
-        read(kpageflagsFd, &range.m_flags[0], count * pageFlagsSize);
-    }
-
-    close(kpagecountFd);
-    close(kpageflagsFd);
-    // cout << "PFN ranges total read bytes: " << readTotal << '\n';
 }
 
 class PfnInfos
 {
 public:
     PfnInfos(vector<PfnRange> data)
-       : m_data(data),
-         m_cachedRange(m_data.begin())
-    {}
+       : m_ranges(data),
+         m_buffer(nullptr),
+         m_cachedRange(m_ranges.begin())
+    {
+        readUseCountsAndFlags();
+    }
+
+    ~PfnInfos() { if (m_buffer) free(m_buffer); }
+
     uint64_t useCount(uint64_t pfn) const;
     uint64_t flags(uint64_t pfn) const;
+
 private:
+    void readUseCountsAndFlags();
     void findRange(uint64_t pfn) const;
-    vector<PfnRange> m_data;
+    vector<PfnRange> m_ranges;
+    uint64_t *m_buffer;
     mutable vector<PfnRange>::const_iterator m_cachedRange;
 };
 
@@ -221,20 +214,63 @@ void PfnInfos::findRange(uint64_t pfn) const
         return;
     }
     // binary search
-    m_cachedRange = lower_bound(m_data.begin(), m_data.end(), pfn);
-    assert(m_cachedRange != m_data.end());
+    m_cachedRange = lower_bound(m_ranges.begin(), m_ranges.end(), pfn);
+    assert(m_cachedRange != m_ranges.end());
 }
 
 uint64_t PfnInfos::useCount(uint64_t pfn) const
 {
     findRange(pfn);
-    return m_cachedRange->useCount(pfn);
+    return m_cachedRange->useCount(m_buffer, pfn);
 }
 
 uint64_t PfnInfos::flags(uint64_t pfn) const
 {
     findRange(pfn);
-    return m_cachedRange->flags(pfn);
+    return m_cachedRange->flags(m_buffer, pfn);
+}
+
+// read kpagemap and kpagecount
+void PfnInfos::readUseCountsAndFlags()
+{
+    assert(!m_buffer);
+    if (m_ranges.empty()) {
+        return;
+    }
+
+    // Extract buffer size from m_ranges using a little shortcut
+    const PfnRange &lastRange = m_ranges.back();
+    const size_t allocSize = (lastRange.m_flagsBufferOffset +
+                               (lastRange.m_flagsBufferOffset - lastRange.m_useCountsBufferOffset)) *
+                             pageFlagsSize;
+    m_buffer = static_cast<uint64_t *>(malloc(allocSize));
+
+    // ### this function takes about half the CPU time of a whole data gathering pass when using
+    //     std::ifstream, and since we're tied to Linux anyway, just use Linux API (note: it only
+    //     shaves off about 30% of this function's execution time - syscalls take the longest time!!)
+    int kpagecountFd = open("/proc/kpagecount", O_RDONLY);
+    int kpageflagsFd = open("/proc/kpageflags", O_RDONLY);
+    if (kpagecountFd < 0 || kpageflagsFd < 0) {
+        return; // TODO error reporting
+    }
+
+    uint64_t readTotal = 0;
+
+    for (PfnRange &range : m_ranges) {
+        size_t count = range.last - range.start + 1;
+        readTotal += count * 2 * pageFlagsSize;
+
+        pread64(kpagecountFd, m_buffer + range.m_useCountsBufferOffset,
+                count * pageFlagsSize, range.start * pageFlagsSize);
+        pread64(kpageflagsFd, m_buffer + range.m_flagsBufferOffset,
+                count * pageFlagsSize, range.start * pageFlagsSize);
+    }
+
+    assert(readTotal == allocSize);
+    // cout << "PFN ranges total read bytes: " << readTotal << '\n';
+
+    close(kpagecountFd);
+    close(kpageflagsFd);
 }
 
 PageInfo::PageInfo(uint pid)
@@ -250,7 +286,6 @@ PageInfo::PageInfo(uint pid)
     {
         vector<MappedRegionInternal> mappedRegions = readMappedRegions(pid);
         vector<PfnRange> pfnRanges = rangifyPfns(readPagemap(pid, &mappedRegions));
-        readUseCountsAndFlags(&pfnRanges);
         PfnInfos pfnInfos(move(pfnRanges));
 
         for (MappedRegionInternal &mappedRegion : mappedRegions) {
