@@ -9,6 +9,9 @@
 
 #include "linux-pm-bits.h"
 
+#include <QApplication>
+#include "mosaicwindow.h"
+
 static const uint maxProcessNameLength = 15; // with the way we use to read it
 
 // from linux/Documentation/vm/pagemap.txt
@@ -133,4 +136,9 @@ int main(int argc, char *argv[])
     cout << "RSS is " << (priv + sharedFull) / 1024 / 1024 << "MiB\n";
     cout << "PSS is " << (priv + sharedProp) / 1024 / 1024 << "MiB\n";
     cout << "number of pages with zero use count is " << pagesWithZeroUseCount << '\n';
+
+    QApplication app(argc, argv);
+    MosaicWindow *mosaic = new MosaicWindow(pid);
+    mosaic->show();
+    return app.exec();
 }
