@@ -1,13 +1,11 @@
 #include "processinfo.h"
 
+#include <cstdlib>
 #include <fstream>
 
 // POSIX specific, but this whole program only works on Linux anyway!
 #include <sys/types.h>
 #include <dirent.h>
-
-// Linux specific, obviously
-#include <linux/kernel-page-flags.h>
 
 using namespace std;
 

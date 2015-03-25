@@ -7,7 +7,7 @@
 
 struct ProcessPid
 {
-    uint pid;
+    unsigned int pid;
     std::string name;
 };
 

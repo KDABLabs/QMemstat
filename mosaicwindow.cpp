@@ -1,6 +1,5 @@
 #include "mosaicwindow.h"
 
-#include "pageinfo.h"
 #include <cassert>
 #include <QDebug>
 #include <utility>
@@ -79,6 +78,49 @@ QString printablePageFlags(uint32_t flags)
 
 static const uint pixelsPerTile = 2;
 
+bool PageInfoReader::addData(const QByteArray &data)
+{
+    m_buffer += data;
+    bool ret = false;
+    // is not guaranteed that there is one or less dataset per chunk of data received, so keep looping
+    while (true) {
+        if (m_length < 0 && m_buffer.length() >= sizeof(size_t)) {
+            m_length = *reinterpret_cast<const uint64_t *>(m_buffer.constData());
+        }
+        if (m_length >= 0 && m_buffer.length() >= m_length + sizeof(size_t)) {
+            ret = true;
+            m_mappedRegions.clear();
+
+            const size_t endPos = m_length + sizeof(m_length);
+            const char *buf = m_buffer.constData();
+
+            for (int pos = sizeof(size_t); pos < endPos; ) {
+                MappedRegion mr;
+                mr.start = *reinterpret_cast<const uint64_t *>(buf + pos);
+                pos += sizeof(uint64_t);
+                mr.end = *reinterpret_cast<const uint64_t *>(buf + pos);
+                pos += sizeof(uint64_t);
+
+                size_t arrayLength = (mr.end - mr.start) / PageInfo::pageSize;
+
+                const uint32_t *array = reinterpret_cast<const uint32_t *>(buf + pos);
+                mr.useCounts.assign(array, array + arrayLength);
+                array += arrayLength;
+                mr.combinedFlags.assign(array, array + arrayLength);
+                pos += 2 * arrayLength * sizeof(uint32_t);
+
+                m_mappedRegions.push_back(move(mr));
+            }
+
+            m_buffer.remove(0, endPos);
+            m_length = -1;
+        } else {
+            break;
+        }
+    }
+    return ret;
+}
+
 // bypass QImage API to save cycles; it does make a difference.
 class Rgb32PixelAccess
 {
@@ -148,21 +190,41 @@ void ColorCache::paintTile(Rgb32PixelAccess *img, uint x, uint y, uint tileSize,
 MosaicWindow::MosaicWindow(uint pid)
    : m_pid(pid)
 {
+    qDebug() << "local process";
     m_updateIntervalWatch.start();
-    // we're not usually *reaching* 50 milliseconds update interval... but one can ask, right?
+    // we're not usually *reaching* 50 milliseconds update interval... but trying doesn't hurt.
     m_updateTimer.setInterval(50);
-    connect(&m_updateTimer, SIGNAL(timeout()), SLOT(updatePageInfo()));
+    connect(&m_updateTimer, SIGNAL(timeout()), SLOT(localUpdateTimeout()));
     m_updateTimer.start();
-    updatePageInfo();
+    localUpdateTimeout();
 }
 
-void MosaicWindow::updatePageInfo()
+MosaicWindow::MosaicWindow(const QByteArray &host, uint port)
+   : m_pid(0)
+{
+    qDebug() << "process on server:" << host << port;
+    m_socket.connectToHost(QString::fromLatin1(host), port, QIODevice::ReadOnly);
+    connect(&m_socket, SIGNAL(readyRead()), SLOT(networkDataAvailable()));
+}
+
+void MosaicWindow::localUpdateTimeout()
+{
+    PageInfo pageInfo(m_pid);
+    updatePageInfo(pageInfo.mappedRegions());
+}
+
+void MosaicWindow::networkDataAvailable()
+{
+    if (m_pageInfoReader.addData(m_socket.readAll())) {
+        updatePageInfo(m_pageInfoReader.m_mappedRegions);
+    }
+}
+
+void MosaicWindow::updatePageInfo(const vector<MappedRegion> &regions)
 {
     qint64 elapsed = m_updateIntervalWatch.restart();
     qDebug() << " >> frame interval" << elapsed << "millseconds";
 
-    PageInfo pageInfo(m_pid);
-    const vector<MappedRegion> &regions = pageInfo.mappedRegions();
     if (regions.empty()) {
         m_img = QImage();
         setPixmap(QPixmap::fromImage(m_img));

@@ -3,104 +3,37 @@
 
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <string>
 
-#include <linux/kernel-page-flags.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
 
+// ### those two "should" be included from /usr/include/linux, but since the kernel gives an ABI
+//     guarantee for user space, it's fairly safe to keep copies and stop requiring that Linux
+//     kernel headers are installed.
+#include "kernel-page-flags.h"
 #include "linux-pm-bits.h"
 
-#include <QApplication>
-#include "mosaicwindow.h"
+using namespace std;
 
 static const uint maxProcessNameLength = 15; // with the way we use to read it
 
-// from linux/Documentation/vm/pagemap.txt
-static const uint pageFlagCount = 32;
-static const char *pageFlagNames[pageFlagCount] = {
-    // KPF_* flags from kernel-page-flags.h, documented in linux/Documentation/vm/pagemap.txt -
-    // those flags are specifically meant to be stable user-space API
-    "LOCKED",
-    "ERROR",
-    "REFERENCED",
-    "UPTODATE",
-    "DIRTY",
-    "LRU",
-    "ACTIVE",
-    "SLAB",
-    "WRITEBACK",
-    "RECLAIM",  // 9 (10 for 1-based indexing)
-    "BUDDY",
-    "MMAP",
-    "ANON",
-    "SWAPCACHE",
-    "SWAPBACKED",
-    "COMPOUND_HEAD",
-    "COMPOUND_TAIL",
-    "HUGE",
-    "UNEVICTABLE",
-    "HWPOISON", // 19
-    "NOPAGE",
-    "KSM",
-    "THP",
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    // flags from /proc/<pid>/pagemap, also documented in linux/Documentation/vm/pagemap.txt -
-    // we shift them around a bit) to clearly group them together and away from the other group
-    "SOFT_DIRTY",
-    "FILE_PAGE / SHARE_ANON", // 29
-    "SWAPPED",
-    "PRESENT"
-};
+static const uint defaultPort = 5550;
 
-using namespace std; // fuck the police :P
+#include "pageinfoserializer.cpp"
 
 static bool isFlagSet(uint64_t flags, uint testFlagShift)
 {
     return flags & (1 << testFlagShift);
 }
 
-string printablePageFlags(uint64_t flags)
+void printSummary(const PageInfo &pageInfo)
 {
-    string ret;
-    for (uint i = 0; i < pageFlagCount; i++) {
-        if (isFlagSet(flags, i)) {
-            assert(pageFlagNames[i]);
-            ret += pageFlagNames[i];
-            ret += ", ";
-        }
-    }
-    if (ret.length() >= 2) {
-        ret.resize(ret.length() - 2);
-    }
-    return ret;
-}
-
-int main(int argc, char *argv[])
-{
-    if (argc != 2) {
-        cerr << "Usage: memstat <pid>/<process-name>\n";
-        return -1;
-    }
-
-    uint pid = strtoul(argv[1], nullptr, 10);
-    if (!pid) {
-        const string procName = string(argv[1]).substr(0, maxProcessNameLength);
-        for (const ProcessPid &pp : readProcessList()) {
-            if (pp.name == procName) {
-                pid = pp.pid;
-                break;
-            }
-        }
-    }
-    if (!pid) {
-        cerr << "Found no such PID or process " << argv[1] << "!\n";
-        return -1;
-    }
-
-    PageInfo pageInfo(pid);
     const vector<MappedRegion> &mappedRegions = pageInfo.mappedRegions();
 
     uint64_t pagesWithZeroUseCount = 0;
@@ -115,7 +48,6 @@ int main(int argc, char *argv[])
         for (size_t i = 0; i < mr.useCounts.size(); i++, addr += PageInfo::pageSize) {
             uint64_t useCount = mr.useCounts[i];
             uint64_t pageFlags = mr.combinedFlags[i];
-            //cout << pfn << ": use count " << useCount << ", flags: " << printablePageFlags(pageInfos.flags(pfn)) << '\n';
             // currently, use count is misreported as 0 for transparent hugepage tail (all after the first)
             // pages - it should be 1
             // ### should we also copy flags from the head page to tail pages?
@@ -136,9 +68,111 @@ int main(int argc, char *argv[])
     cout << "RSS is " << (priv + sharedFull) / 1024 / 1024 << "MiB\n";
     cout << "PSS is " << (priv + sharedProp) / 1024 / 1024 << "MiB\n";
     cout << "number of pages with zero use count is " << pagesWithZeroUseCount << '\n';
+}
 
-    QApplication app(argc, argv);
-    MosaicWindow *mosaic = new MosaicWindow(pid);
-    mosaic->show();
-    return app.exec();
+static void printUsage()
+{
+    cerr << "Usage: memstat <pid>/<process-name>\n"
+         << "       memstat <pid> [--server [<portnumber>]]\n";
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc < 2) {
+        printUsage();
+        return -1;
+    }
+
+    bool network = false;
+    uint port = defaultPort;
+
+    if (argc > 2) {
+        network = true;
+        if (string(argv[2]) != ("--server") || argc > 4) {
+            printUsage();
+            return -1;
+        }
+
+        if (argc == 4) {
+            port = strtoul(argv[3], nullptr, 10);
+            if (!port) {
+                cerr << "Invalid port number " << argv[3] << '\n';
+                printUsage();
+                return -1;
+            }
+        }
+    }
+
+    uint pid = strtoul(argv[1], nullptr, 10);
+    if (!pid) {
+        const string procName = string(argv[1]).substr(0, maxProcessNameLength);
+        for (const ProcessPid &pp : readProcessList()) {
+            if (pp.name == procName) {
+                pid = pp.pid;
+                break;
+            }
+        }
+    }
+    if (!pid) {
+        cerr << "Found no such PID or process " << argv[1] << "!\n";
+        return -1;
+    }
+
+
+    if (!network) {
+        cerr << "local mode.\n";
+        PageInfo pageInfo(pid);
+        printSummary(pageInfo);
+        return 0;
+    }
+
+    cerr << "server mode.\n";
+    // listen on TCP/IP port, accept one connection, and periodically send data
+
+    const int listenFd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listenFd < 0) {
+        return -1;
+    }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    bool ok = true;
+    ok = ok && (bind(listenFd, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+    ok = ok && (listen(listenFd, /* max queued incoming connections */ 1) == 0);
+    if (!ok) {
+        close(listenFd);
+        return -1;
+    }
+
+    const int connFd = accept(listenFd, nullptr, nullptr);
+    if (connFd < 0) {
+        return -1;
+    }
+    close(listenFd);
+
+    while (true) {
+        // destroy PageInfo and PageInfoSerializer when done sending to free their memory...
+        {
+            PageInfo pageInfo(pid);
+            // serialize PageInfo output (vector<MappedRegion>) while sending, to avoid using even
+            // more memory on the target system.
+            PageInfoSerializer serializer(pageInfo);
+            while (true) {
+                pair<const char*, size_t> ser = serializer.serializeMore();
+                if (ser.second == 0) {
+                    break;
+                }
+                if (write(connFd, ser.first, ser.second) < ser.second) {
+                    break;
+                }
+            }
+        }
+        //sleep(5);
+    }
+
+    return 0;
 }

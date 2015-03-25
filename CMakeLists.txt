@@ -1,19 +1,25 @@
 cmake_minimum_required(VERSION 2.8.12)
 project(memstat)
 
-find_package(Qt4 REQUIRED)
-include(${QT_USE_FILE})
-add_definitions(${QT_DEFINITIONS})
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -D_LARGEFILE64_SOURCE")
-
-qt4_wrap_cpp(memstat_MOC mosaicwindow.h)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x -D_LARGEFILE64_SOURCE")
 
 add_executable(memstat
                memstat.cpp
                processinfo.cpp
-               pageinfo.cpp
-               mosaicwindow.cpp
-               ${memstat_MOC})
+               pageinfo.cpp)
 
-target_link_libraries(memstat ${QT_LIBRARIES})
+find_package(Qt4)
+if (Qt4_FOUND)
+    set(QT_USE_QTNETWORK TRUE)
+    include(${QT_USE_FILE})
+
+    add_definitions(${QT_DEFINITIONS})
+    qt4_wrap_cpp(qmemstat_MOC mosaicwindow.h)
+    add_executable(qmemstat
+                qmemstat.cpp
+                processinfo.cpp
+                pageinfo.cpp
+                mosaicwindow.cpp
+                ${qmemstat_MOC})
+    target_link_libraries(qmemstat ${QT_LIBRARIES})
+endif()
