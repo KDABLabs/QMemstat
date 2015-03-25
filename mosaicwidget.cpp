@@ -1,4 +1,4 @@
-#include "mosaicwindow.h"
+#include "mosaicwidget.h"
 
 #include <cassert>
 #include <QDebug>
@@ -187,7 +187,7 @@ void ColorCache::paintTile(Rgb32PixelAccess *img, uint x, uint y, uint tileSize,
     }
 }
 
-MosaicWindow::MosaicWindow(uint pid)
+MosaicWidget::MosaicWidget(uint pid)
    : m_pid(pid)
 {
     qDebug() << "local process";
@@ -197,37 +197,42 @@ MosaicWindow::MosaicWindow(uint pid)
     connect(&m_updateTimer, SIGNAL(timeout()), SLOT(localUpdateTimeout()));
     m_updateTimer.start();
     localUpdateTimeout();
+
+    setWidget(&m_mosaicWidget);
 }
 
-MosaicWindow::MosaicWindow(const QByteArray &host, uint port)
+MosaicWidget::MosaicWidget(const QByteArray &host, uint port)
    : m_pid(0)
 {
     qDebug() << "process on server:" << host << port;
     m_socket.connectToHost(QString::fromLatin1(host), port, QIODevice::ReadOnly);
     connect(&m_socket, SIGNAL(readyRead()), SLOT(networkDataAvailable()));
+
+    setWidget(&m_mosaicWidget);
 }
 
-void MosaicWindow::localUpdateTimeout()
+void MosaicWidget::localUpdateTimeout()
 {
     PageInfo pageInfo(m_pid);
     updatePageInfo(pageInfo.mappedRegions());
 }
 
-void MosaicWindow::networkDataAvailable()
+void MosaicWidget::networkDataAvailable()
 {
     if (m_pageInfoReader.addData(m_socket.readAll())) {
         updatePageInfo(m_pageInfoReader.m_mappedRegions);
     }
 }
 
-void MosaicWindow::updatePageInfo(const vector<MappedRegion> &regions)
+void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
 {
     qint64 elapsed = m_updateIntervalWatch.restart();
     qDebug() << " >> frame interval" << elapsed << "millseconds";
 
     if (regions.empty()) {
         m_img = QImage();
-        setPixmap(QPixmap::fromImage(m_img));
+        m_mosaicWidget.setPixmap(QPixmap::fromImage(m_img));
+        m_mosaicWidget.adjustSize();
         return;
     }
 
@@ -408,5 +413,6 @@ void MosaicWindow::updatePageInfo(const vector<MappedRegion> &regions)
         row += tilesPerSeparator;
     }
 
-    setPixmap(QPixmap::fromImage(m_img));
+    m_mosaicWidget.setPixmap(QPixmap::fromImage(m_img));
+    m_mosaicWidget.adjustSize();
 }

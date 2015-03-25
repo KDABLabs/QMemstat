@@ -14,12 +14,13 @@ if (Qt4_FOUND)
     include(${QT_USE_FILE})
 
     add_definitions(${QT_DEFINITIONS})
-    qt4_wrap_cpp(qmemstat_MOC mosaicwindow.h)
+    qt4_wrap_cpp(qmemstat_MOC mosaicwidget.h mainwindow.h)
     add_executable(qmemstat
                 qmemstat.cpp
                 processinfo.cpp
                 pageinfo.cpp
-                mosaicwindow.cpp
+                mosaicwidget.cpp
+                mainwindow.cpp
                 ${qmemstat_MOC})
     target_link_libraries(qmemstat ${QT_LIBRARIES})
 endif()

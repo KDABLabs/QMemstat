@@ -1,6 +1,6 @@
 #include "processinfo.h"
 
-#include "mosaicwindow.h"
+#include "mainwindow.h"
 
 #include <iostream>
 #include <linux/kernel-page-flags.h>
@@ -70,14 +70,14 @@ int main(int argc, char *argv[])
     }
 
     QApplication app(argc, argv);
-    MosaicWindow *mosaic = nullptr;
+    MainWindow *mainWindow = nullptr;
     if (pid > 0) {
         cerr << "local mode.\n";
-        mosaic = new MosaicWindow(pid);
+        mainWindow = new MainWindow(pid);
     } else {
         cerr << "server mode.\n";
-        mosaic = new MosaicWindow(host, port);
+        mainWindow = new MainWindow(host, port);
     }
-    mosaic->show();
+    mainWindow->show();
     return app.exec();
 }

@@ -1,10 +1,11 @@
-#ifndef MOSAICWINDOW_H
-#define MOSAICWINDOW_H
+#ifndef MOSAICWIDGET_H
+#define MOSAICWIDGET_H
 
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <QImage>
 #include <QLabel>
+#include <QScrollArea>
 #include <QTimer>
 #include <QTcpSocket>
 
@@ -23,12 +24,12 @@ private:
     QByteArray m_buffer;
 };
 
-class MosaicWindow : public QLabel
+class MosaicWidget : public QScrollArea
 {
     Q_OBJECT
 public:
-    MosaicWindow(uint pid);
-    MosaicWindow(const QByteArray &host, uint port);
+    MosaicWidget(uint pid);
+    MosaicWidget(const QByteArray &host, uint port);
 
 private slots:
     void localUpdateTimeout();
@@ -42,7 +43,8 @@ private:
     QElapsedTimer m_updateIntervalWatch;
     QTcpSocket m_socket;
     PageInfoReader m_pageInfoReader;
+    QLabel m_mosaicWidget;
     QImage m_img;
 };
 
-#endif // MOSAICWINDOW_H
+#endif // MOSAICWIDGET_H
