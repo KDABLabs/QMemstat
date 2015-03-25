@@ -77,7 +77,7 @@ QString printablePageFlags(uint32_t flags)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-static const uint pixelsPerTile = 1;
+static const uint pixelsPerTile = 2;
 
 // bypass QImage API to save cycles; it does make a difference.
 class Rgb32PixelAccess
