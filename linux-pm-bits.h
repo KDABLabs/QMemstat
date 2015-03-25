@@ -1,7 +1,7 @@
 #ifndef LINUX_PM_BITS_H
 #define LINUX_PM_BITS_H
 
-// from the kernel - instead of decrypting all that crap, let's just use it
+// extracted from .c files in the kernel - instead of decrypting all that crap, let's just use it
 
 #define PM_ENTRY_BYTES      sizeof(uint64_t)
 #define PM_STATUS_BITS      3

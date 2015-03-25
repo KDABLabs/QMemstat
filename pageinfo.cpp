@@ -92,9 +92,9 @@ static vector<uint64_t> readPagemap(uint pid, vector<MappedRegionInternal> *mapp
                 ret.push_back(pfn);
             }
             // copy pagemap flag bits into combined flags as follows:
-            // 63 -> 31; 62 -> 30; 61 -> 29; 55-> 28
-            region.combinedFlags[i] = ((pageBits >> 32) & 0xe0000000) | // shift and mask upper 3 bits
-                                      ((pageBits >> 27) & 0x10000000); // shift and mask bit 55 to bit 28
+            // 55-> 28 ; 61 -> 29 ; 62 -> 30 ; 63 -> 31
+            region.combinedFlags[i] = ((pageBits >> 27) & 0x10000000) | // shift and mask bit 55 to bit 28
+                                      ((pageBits >> 32) & 0xe0000000); // shift and mask upper 3 bits
             // flags from /proc/kpageflags are added later
         }
     }
@@ -324,7 +324,6 @@ PageInfo::PageInfo(uint pid)
             uint32_t prevStart = m_mappedRegions[i].start;
             m_mappedRegions[i].start = m_mappedRegions[i - 1].end;
             if (m_mappedRegions[i].start >= m_mappedRegions[i].end) {
-                cout << "especially weird case" << endl;
                 // This renders the range inert... might be better to remove it altogether.
                 // Note that we move the end instead of the start, to maintain the invariant that the
                 // start address of region n+1 is >= end address of region n.
@@ -332,15 +331,11 @@ PageInfo::PageInfo(uint pid)
                 m_mappedRegions[i].useCounts.clear();
                 m_mappedRegions[i].combinedFlags.clear();
             } else if (!m_mappedRegions[i].useCounts.empty()) {
-                cout << "normally weird case" << endl;
                 const size_t delCount = (m_mappedRegions[i].start - prevStart) / pageSize;
                 m_mappedRegions[i].useCounts.erase(m_mappedRegions[i].useCounts.begin(),
                                                    m_mappedRegions[i].useCounts.begin() + delCount);
                 m_mappedRegions[i].combinedFlags.erase(m_mappedRegions[i].combinedFlags.begin(),
                                                        m_mappedRegions[i].combinedFlags.begin() + delCount);
-            } else {
-                cout << "weirdly unweird case?!" << endl;
-                cout << hex << m_mappedRegions[i].start << ":" << hex << m_mappedRegions[i].end << endl;
             }
             cout << "corrected  " << hex << m_mappedRegions[i - 1].start << hex << " " << m_mappedRegions[i - 1].end << " "
                  << m_mappedRegions[i].start << " " << hex << m_mappedRegions[i].end << endl;

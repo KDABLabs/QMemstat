@@ -4,11 +4,8 @@
 #include <cstdint>
 #include <vector>
 
-// TODO clean up the interface:
-// - iterator?
-// - explain and / or export page size (==4096)
-// - vector of struct, instead of struct of vectors?
-// - tell the backing file in case there is one (mmap!)
+// TODO
+// - tell the backing file for each MappedRegion in case there is one (mmap!)
 
 struct MappedRegion
 {
