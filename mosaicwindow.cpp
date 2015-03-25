@@ -9,6 +9,74 @@
 
 using namespace std;
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+// from linux/Documentation/vm/pagemap.txt
+static const uint pageFlagCount = 32;
+static const char *pageFlagNames[pageFlagCount] = {
+    // KPF_* flags from kernel-page-flags.h, documented in linux/Documentation/vm/pagemap.txt -
+    // those flags are specifically meant to be stable user-space API
+    "LOCKED",
+    "ERROR",
+    "REFERENCED",
+    "UPTODATE",
+    "DIRTY",
+    "LRU",
+    "ACTIVE",
+    "SLAB",
+    "WRITEBACK",
+    "RECLAIM",  // 9 (10 for 1-based indexing)
+    "BUDDY",
+    "MMAP",
+    "ANON",
+    "SWAPCACHE",
+    "SWAPBACKED",
+    "COMPOUND_HEAD",
+    "COMPOUND_TAIL",
+    "HUGE",
+    "UNEVICTABLE",
+    "HWPOISON", // 19
+    "NOPAGE",
+    "KSM",
+    "THP",
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    // flags from /proc/<pid>/pagemap, also documented in linux/Documentation/vm/pagemap.txt -
+    // we shift them around a bit to clearly group them together and away from the other group,
+    // as documented in readPagemap() in pageinfo.cpp: 55-> 28 ; 61 -> 29 ; 62 -> 30; 63 -> 31
+    "SOFT_DIRTY",
+    "FILE_PAGE / SHARE_ANON", // 29
+    "SWAPPED",
+    "PRESENT"
+};
+
+static bool isFlagSet(uint32_t flags, uint testFlagShift)
+{
+    return flags & (1 << testFlagShift);
+}
+
+QString printablePageFlags(uint32_t flags)
+{
+    QString ret;
+    for (uint i = 0; i < pageFlagCount; i++) {
+        if (isFlagSet(flags, i)) {
+            assert(pageFlagNames[i]);
+            ret += pageFlagNames[i];
+            ret += ", ";
+        }
+    }
+    if (ret.length() >= 2) {
+        ret.resize(ret.length() - 2);
+    }
+    return ret;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 static const uint pixelsPerTile = 1;
 
 // bypass QImage API to save cycles; it does make a difference.
@@ -170,10 +238,14 @@ void MosaicWindow::updatePageInfo()
     Rgb32PixelAccess pixels(m_img.width(), m_img.height(), m_img.bits());
     // don't always construct QColors from enums - this would eat ~ 10% or so of frame time.
     const QColor colorWhite(Qt::white);
+    const QColor colorGray(Qt::darkGray);
     const QColor colorMagenta(Qt::magenta);
     const QColor colorMagentaLight = QColor(Qt::magenta).lighter(150);
     const QColor colorYellow(Qt::yellow);
     const QColor colorCyan(Qt::blue);
+    const QColor colorGreen(Qt::green);
+    const QColor colorGreenDark(Qt::darkGreen);
+    const QColor colorRedDark(Qt::darkRed);
     const QColor colorBlack(Qt::black);
     // cache results of QColor::darken()
     ColorCache cc;
@@ -200,13 +272,23 @@ void MosaicWindow::updatePageInfo()
                 for ( ; column < endColumn; column++, iPage++) {
                     //qDebug() << "magenta" << column << row;
                     QColor color = colorWhite;
-                    if (region->combinedFlags[iPage] & (1 << KPF_THP)) {
-                        // equivalent to use count 1, but with THP
+                    if (!(region->combinedFlags[iPage] & (1 << 31))) { // TODO no magic numbers - checking if "present" flag clear here
+                        color = colorGray;
+                    } else if ((region->combinedFlags[iPage] & (1 << KPF_MMAP)) &&
+                               !(region->combinedFlags[iPage] & (1 << KPF_ANON))) {
+                        color = region->useCounts[iPage] > 1 ? colorGreen : colorGreenDark;
+                    } else if (region->combinedFlags[iPage] & (1 << KPF_THP)) {
+                        // THP implies use count 1; the kernel wrongly reports use count 0 in this case
                         color = colorMagentaLight;
                     } else if (region->useCounts[iPage] == 1) {
                         color = colorMagenta;
                     } else if (region->useCounts[iPage] > 1) {
                         color = colorYellow;
+                    } else if (region->combinedFlags[iPage] & (1 << KPF_NOPAGE)) {
+                        color = colorRedDark;
+                    } else {
+                        qDebug() << "white page has use count" << region->useCounts[iPage] << "and flags"
+                                 << printablePageFlags(region->combinedFlags[iPage]);
                     }
                     cc.paintTile(&pixels, column, row, pixelsPerTile, color);
                 }
