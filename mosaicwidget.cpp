@@ -76,7 +76,8 @@ QString printablePageFlags(uint32_t flags)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-static const uint pixelsPerTile = 2;
+static const uint s_pixelsPerTile = 2;
+static const uint s_columnCount = 512;
 
 bool PageInfoReader::addData(const QByteArray &data)
 {
@@ -145,7 +146,7 @@ public:
     ColorCache()
        : m_cachedColor(0)
     {
-        for (int i = 0; i < pixelsPerTile * pixelsPerTile; i++) {
+        for (int i = 0; i < s_pixelsPerTile * s_pixelsPerTile; i++) {
             m_colorCache[i] = 0;
         }
     }
@@ -157,7 +158,7 @@ private:
     void maybeUpdateColors(const QColor &color);
 
     uint m_cachedColor;
-    uint m_colorCache[pixelsPerTile * pixelsPerTile];
+    uint m_colorCache[s_pixelsPerTile * s_pixelsPerTile];
 };
 
 void ColorCache::maybeUpdateColors(const QColor &color)
@@ -167,7 +168,7 @@ void ColorCache::maybeUpdateColors(const QColor &color)
     }
     m_cachedColor = color.rgb();
     QColor c = color;
-    for (int i = 0; i < pixelsPerTile * pixelsPerTile; i++) {
+    for (int i = 0; i < s_pixelsPerTile * s_pixelsPerTile; i++) {
         m_colorCache[i] = c.rgb();
         c = c.darker(115);
     }
@@ -284,7 +285,6 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
         // qDebug() << "region" << QString("%1").arg(r.first, 0, 16) << QString("%1").arg(r.second, 0, 16);
     }
 
-    static const uint columnCount = 512;
     static const uint tilesPerSeparator = 2;
 
     // determine size
@@ -292,14 +292,14 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
     uint rowCount = (largeRegions.size() - 1) * tilesPerSeparator;
     // space for tiles showing showing pages (corresponding to contents of largeRegions)
     for (pair<quint64, quint64> largeRegion : largeRegions) {
-        rowCount += ((largeRegion.second - largeRegion.first) / PageInfo::pageSize + (columnCount - 1)) /
-                    columnCount;
+        rowCount += ((largeRegion.second - largeRegion.first) / PageInfo::pageSize + (s_columnCount - 1)) /
+                    s_columnCount;
     }
     qDebug() << "row count is" << rowCount << " largeRegion count is" << largeRegions.size();
 
     // paint!
 
-    m_img = QImage(columnCount * pixelsPerTile, rowCount * pixelsPerTile, QImage::Format_RGB32);
+    m_img = QImage(s_columnCount * s_pixelsPerTile, rowCount * s_pixelsPerTile, QImage::Format_RGB32);
     // Theoretically we need to get the stride of the image, but in practice it is equal to width,
     // especially with the power-of-2 widths we are using.
     Rgb32PixelAccess pixels(m_img.width(), m_img.height(), m_img.bits());
@@ -332,9 +332,9 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
             size_t iPage = 0;
             // when to stop painting the current column:
             // - iPage >= pagesInRegion
-            // - column >= columnCount
+            // - column >= s_columnCount
             while (iPage < region->useCounts.size()) {
-                const size_t endColumn = qMin(column + region->useCounts.size() - iPage, size_t(columnCount));
+                const size_t endColumn = qMin(column + region->useCounts.size() - iPage, size_t(s_columnCount));
                 //qDebug() << "painting region" << column << endColumn;
                 for ( ; column < endColumn; column++, iPage++) {
                     //qDebug() << "magenta" << column << row;
@@ -357,9 +357,9 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
                         qDebug() << "white page has use count" << region->useCounts[iPage] << "and flags"
                                  << printablePageFlags(region->combinedFlags[iPage]);
                     }
-                    cc.paintTile(&pixels, column, row, pixelsPerTile, color);
+                    cc.paintTile(&pixels, column, row, s_pixelsPerTile, color);
                 }
-                if (column == columnCount) {
+                if (column == s_columnCount) {
                     column = 0;
                     row++;
                 }
@@ -373,8 +373,8 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
             //    done differently, but i don't think it's worth it if you think about how to do it.
             iMappedRegion++;
 
-            assert(column <= columnCount);
-            size_t gapPages = column ? (columnCount - column) : 0;
+            assert(column <= s_columnCount);
+            size_t gapPages = column ? (s_columnCount - column) : 0;
             if (iMappedRegion < regions.size() && regions[iMappedRegion].start < largeRegion.second) {
                 //qDebug() << "doing it..." << QString("%1").arg(region->end, 0, 16)
                 //                          << QString("%1").arg(regions[iMappedRegion].start, 0, 16);
@@ -382,15 +382,15 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
                 // region still points to previous MappedRegion...
                 gapPages = (regions[iMappedRegion].start - region->end) / PageInfo::pageSize;
             }
-            assert(gapPages < columnCount);
+            assert(gapPages < s_columnCount);
             while (gapPages) {
-                const size_t endColumn = qMin(size_t(columnCount), column + gapPages);
+                const size_t endColumn = qMin(size_t(s_columnCount), column + gapPages);
                 gapPages -= (endColumn - column);
                 //qDebug() << "painting gap" << column << endColumn << gapPages;
                 for ( ; column < endColumn; column++) {
-                    cc.paintTile(&pixels, column, row, pixelsPerTile, colorCyan);
+                    cc.paintTile(&pixels, column, row, s_pixelsPerTile, colorCyan);
                 }
-                if (column == columnCount) {
+                if (column == s_columnCount) {
                     column = 0;
                     row++;
                 }
@@ -406,8 +406,8 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
         // draw separator line; we avoid a line after the last largeRegion via the "&& y < rowCount"
         // condition and decreasing rowCount by the width (here really: height) of a line.
         for (int y = row; y < row + tilesPerSeparator && y < rowCount; y++) {
-            for (int x = 0 ; x < columnCount; x++) {
-                cc.paintTile(&pixels, x, y, pixelsPerTile, colorBlack);
+            for (int x = 0 ; x < s_columnCount; x++) {
+                cc.paintTile(&pixels, x, y, s_pixelsPerTile, colorBlack);
             }
         }
         row += tilesPerSeparator;
