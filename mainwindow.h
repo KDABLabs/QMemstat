@@ -4,6 +4,7 @@
 #include <QMainWindow>
 
 class MosaicWidget;
+class QTextEdit;
 
 class MainWindow : public QMainWindow
 {
@@ -14,8 +15,14 @@ public:
     MainWindow(uint pid);
     MainWindow(const QByteArray &host, uint port);
 
+private slots:
+    void showPageInfo(quint64 addr, quint32 useCount, const QString &backingFile);
+
 private:
+    void init();
+
     MosaicWidget *m_mosaicWidget;
+    QTextEdit *m_pageInfoText;
 };
 
 #endif // MAINWINDOW_H

@@ -2,6 +2,7 @@
 #define PAGEINFO_H
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 // TODO
@@ -11,6 +12,7 @@ struct MappedRegion
 {
     uint64_t start;
     uint64_t end;
+    std::string backingFile;
     std::vector<uint32_t> useCounts;
     std::vector<uint32_t> combinedFlags;
     bool operator<(const MappedRegion &other) const { return start < other.start; }

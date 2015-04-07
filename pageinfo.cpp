@@ -42,13 +42,20 @@ static vector<MappedRegionInternal> readMappedRegions(uint pid)
         return ret; // TODO error msg
     }
     string mapLine;
+
     while (getline(mapsFile, mapLine)) {
         // cout << mapLine << '\n';
         MappedRegionInternal region;
+
         region.start = 0;
         region.end = 0;
-        sscanf(mapLine.c_str(), "%p-%p", reinterpret_cast<void **>(&region.start),
-                                         reinterpret_cast<void **>(&region.end));
+        char filename[PATH_MAX];
+        filename[0] = '\0';
+
+        sscanf(mapLine.c_str(), "%lx-%lx %*4s %*lx %*5s %*ld %s",
+               &region.start, &region.end, filename);
+        region.backingFile = string(filename);
+
         ret.push_back(region);
     }
     return ret;
@@ -302,7 +309,9 @@ PageInfo::PageInfo(uint pid)
             mappedRegion.pagemapEntries.clear();
 
             MappedRegion publicMappedRegion = { mappedRegion.start, mappedRegion.end,
-                                                move(mappedRegion.useCounts), move(mappedRegion.combinedFlags) };
+                                                move(mappedRegion.backingFile),
+                                                move(mappedRegion.useCounts),
+                                                move(mappedRegion.combinedFlags) };
             m_mappedRegions.push_back(move(publicMappedRegion));
         }
     }

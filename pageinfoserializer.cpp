@@ -5,6 +5,9 @@
         // note this is one MappedRegion entry
         uint64_t MappedRegion::start
         uint64_t MappedRegion::end
+        uint32_t backingFile.length()
+        char[backingFile.length()]
+        padding to next uint32_t (4 byte boundary)
         uint32_t useCounts[(MappedRegion::end - MappedRegion::start) / PageInfo::pageSize]
         uint32_t combinedFlags[(MappedRegion::end - MappedRegion::start) / PageInfo::pageSize]
     until read position == length + sizeof(length)
@@ -28,12 +31,14 @@ private:
     bool nextRegionIf(bool cond);
     template<typename T>
     bool placePrimitiveTypeAt(T value, size_t *bufPos, size_t *staticMemberOffset = nullptr);
+    bool placeStringAt(const std::string &value, size_t *bufPos, size_t *staticMemberOffset);
     static size_t chunkSize() { return sizeof(m_buffer); }
 
     const std::vector<MappedRegion> &m_mappedRegions;
     int m_region;
     size_t m_posInRegion;
-    char m_buffer[16 * 1024]; // set size to 9 or 11 or so (must be >= sizeof(uint64_t) for stress testing
+    char m_buffer[16 * 1024]; // must be >= padded size of longest string we're going to have
+                              // (we don't split strings)
 };
 
 template<typename T>
@@ -52,7 +57,45 @@ bool PageInfoSerializer::placePrimitiveTypeAt(T value, size_t *bufPos, size_t *s
         *bufPos += sizeof(value);
         m_posInRegion += sizeof(value);
     }
-    return true;
+    return ok;
+}
+
+static size_t stringStorageSize(const std::string &str)
+{
+    return sizeof(uint32_t) + str.length();
+}
+
+static size_t padStringStorageSize(size_t size)
+{
+    // round to next multiple of 4 / sizeof(uint32_t)
+    size += sizeof(uint32_t) - 1;
+    size &= ~0x3;
+    return size;
+}
+
+bool PageInfoSerializer::placeStringAt(const std::string &str, size_t *bufPos, size_t *staticMemberOffset)
+{
+    const size_t strSize = stringStorageSize(str);
+    const size_t paddedSize = padStringStorageSize(strSize);
+
+    bool ok = *staticMemberOffset == m_posInRegion;
+    *staticMemberOffset += paddedSize;
+
+    const size_t finalBufPos = *bufPos + paddedSize;
+    ok = ok && finalBufPos <= chunkSize();
+    if (ok) {
+        // write length
+        *reinterpret_cast<uint32_t *>(m_buffer + *bufPos) = str.length();
+        // write chars (assuming utf-8 or or other <= 8 bit format)
+        memcpy(m_buffer + *bufPos + sizeof(uint32_t), str.c_str(), str.length());
+        // pad to next 4-byte boundary
+        memset(m_buffer + *bufPos + strSize, 0, paddedSize - strSize);
+
+        *bufPos += paddedSize;
+        assert(*bufPos == finalBufPos);
+        m_posInRegion += paddedSize;
+    }
+    return ok;
 }
 
 bool PageInfoSerializer::nextRegionIf(bool cond)
@@ -70,9 +113,12 @@ pair<const char*, size_t> PageInfoSerializer::serializeMore()
     if (m_region == -1) {
         // write the size of the whole list of MappedRegions into the output as a framing header
         uint64_t size = m_mappedRegions.size() * 2 * sizeof(uint64_t); // all the "start" and "end" members
-        // useCounts and combinedFlags data
+
         for (const MappedRegion &mr : m_mappedRegions) {
+            // useCounts and combinedFlags
             size += (mr.end - mr.start) / PageInfo::pageSize * 2 * sizeof(uint32_t);
+            // backingFile strings
+            size += padStringStorageSize(stringStorageSize(mr.backingFile));
         }
         placePrimitiveTypeAt(size, &bufPos);
         nextRegionIf(true);
@@ -93,6 +139,7 @@ pair<const char*, size_t> PageInfoSerializer::serializeMore()
         // || wrote last to prevent short-circuit evaluation eliminating the call doing the actual write!
         wrote = placePrimitiveTypeAt(mr.start, &bufPos, &regionMemberOffset) || wrote;
         wrote = placePrimitiveTypeAt(mr.end, &bufPos, &regionMemberOffset) || wrote;
+        wrote = placeStringAt(mr.backingFile, &bufPos, &regionMemberOffset) || wrote;
 
         if (m_posInRegion >= regionMemberOffset) {
             const size_t arraySize = (mr.end - mr.start) / PageInfo::pageSize * sizeof(uint32_t);
@@ -106,7 +153,7 @@ pair<const char*, size_t> PageInfoSerializer::serializeMore()
                 regionMemberOffset += arraySize;
             }
             const size_t arrayEnd = regionMemberOffset + arraySize;
-            assert(m_posInRegion < arrayEnd && m_posInRegion < 2 * (sizeof(uint64_t) + arraySize));
+            assert(m_posInRegion < arrayEnd);
 
             const char *const data = reinterpret_cast<const char*>(isFlags ? &mr.combinedFlags[0]
                                                                            : &mr.useCounts[0])
@@ -130,7 +177,7 @@ pair<const char*, size_t> PageInfoSerializer::serializeMore()
             // if we just finished copying useCounts, we'll copy combinedFlags in the next while loop
             // iteration using (and thus exercising) the resumable serialization that we do anyway.
 
-            assert(m_posInRegion <= arrayEnd && m_posInRegion <= 2 * (sizeof(uint64_t) + arraySize));
+            assert(m_posInRegion <= arrayEnd);
             nextRegionIf(isFlags && m_posInRegion >= arrayEnd);
         }
     }
