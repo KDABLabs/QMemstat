@@ -292,7 +292,12 @@ PageInfo::PageInfo(uint pid)
 
     {
         vector<MappedRegionInternal> mappedRegions = readMappedRegions(pid);
-        vector<PfnRange> pfnRanges = rangifyPfns(readPagemap(pid, &mappedRegions));
+        vector<uint64_t> pagemap = readPagemap(pid, &mappedRegions);
+        if (pagemap.empty()) {
+            // usual cause: couldn't read pagemap due to lack of permissions (user is not root)
+            return;
+        }
+        vector<PfnRange> pfnRanges = rangifyPfns(move(pagemap));
         PfnInfos pfnInfos(move(pfnRanges));
 
         for (MappedRegionInternal &mappedRegion : mappedRegions) {

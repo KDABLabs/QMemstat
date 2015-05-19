@@ -73,7 +73,7 @@ void printSummary(const PageInfo &pageInfo)
 static void printUsage()
 {
     cerr << "Usage: memstat <pid>/<process-name>\n"
-         << "       memstat <pid> [--server [<portnumber>]]\n";
+         << "       memstat <pid>/<process-name> [--server [<portnumber>]]\n";
 }
 
 int main(int argc, char *argv[])
@@ -122,6 +122,10 @@ int main(int argc, char *argv[])
     if (!network) {
         cerr << "local mode.\n";
         PageInfo pageInfo(pid);
+        if (pageInfo.mappedRegions().empty()) {
+            cerr << "Could not read page information. Are you root?\n";
+            return 1;
+        }
         printSummary(pageInfo);
         return 0;
     }

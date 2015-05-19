@@ -36,6 +36,10 @@ signals:
     void showPageInfo(quint64 addr, quint32 useCount, const QString &backingFile);
     // value ~0 / (all bits set) on combinedFlags parameter means invalid page
     void showFlags(quint32 combinedFlags);
+    void serverConnectionBroke(bool);
+
+private slots:
+    void socketError();
 
 protected:
     bool eventFilter(QObject *, QEvent *);

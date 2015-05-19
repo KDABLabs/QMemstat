@@ -215,8 +215,9 @@ MosaicWidget::MosaicWidget(const QByteArray &host, uint port)
    : m_pid(0)
 {
     qDebug() << "process on server:" << host << port;
-    m_socket.connectToHost(QString::fromLatin1(host), port, QIODevice::ReadOnly);
     connect(&m_socket, SIGNAL(readyRead()), SLOT(networkDataAvailable()));
+    connect(&m_socket, SIGNAL(error(QAbstractSocket::SocketError)), SLOT(socketError()));
+    m_socket.connectToHost(QString::fromLatin1(host), port, QIODevice::ReadOnly);
 
     setWidget(&m_mosaicWidget);
 }
@@ -224,7 +225,15 @@ MosaicWidget::MosaicWidget(const QByteArray &host, uint port)
 void MosaicWidget::localUpdateTimeout()
 {
     PageInfo pageInfo(m_pid);
-    updatePageInfo(pageInfo.mappedRegions());
+    if (!pageInfo.mappedRegions().empty()) {
+        updatePageInfo(pageInfo.mappedRegions());
+    } else {
+        emit showPageInfo(0, 0, QString());
+        // HACK: not stopping the timer because clients expect to get regular updates, most importantly
+        //       they expect that missing the first update is not critical
+        // m_updateTimer.stop();
+        return;
+    }
 }
 
 void MosaicWidget::networkDataAvailable()
@@ -232,6 +241,11 @@ void MosaicWidget::networkDataAvailable()
     if (m_pageInfoReader.addData(m_socket.readAll())) {
         updatePageInfo(m_pageInfoReader.m_mappedRegions);
     }
+}
+
+void MosaicWidget::socketError()
+{
+    emit serverConnectionBroke(m_regions.size());
 }
 
 void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
