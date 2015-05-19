@@ -237,7 +237,7 @@ void MosaicWidget::networkDataAvailable()
 void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
 {
     qint64 elapsed = m_updateIntervalWatch.restart();
-    //qDebug() << " >> frame interval" << elapsed << "millseconds";
+    //qDebug() << " >> frame interval" << elapsed << "milliseconds";
 
     m_regions = regions;
     m_largeRegions.clear();
@@ -472,17 +472,15 @@ void MosaicWidget::printPageFlagsAtAddr(quint64 addr)
     }
     if (rIt->start > addr) {
         Q_ASSERT(rIt != m_regions.begin()); // this can only happen when input data is inconsistent
-        qDebug() << QString("%1").arg(addr, 0, 16) // hex format
-                 << "in a gap between"
-                 << QString("%1").arg(rIt->start, 0, 16) << "and"
-                 << QString("%1").arg((rIt - 1)->end, 0, 16) << "!";
+        //qDebug() << QString("%1").arg(addr, 0, 16) // hex format
+        //         << "in a gap between"
+        //         << QString("%1").arg(rIt->start, 0, 16) << "and"
+        //         << QString("%1").arg((rIt - 1)->end, 0, 16) << "!";
         return;
     }
 
     const size_t index = (addr - rIt->start) / PageInfo::pageSize;
 
-    qDebug() << QString("%1").arg(addr, 0, 16)
-             << rIt->useCounts[index] << rIt->combinedFlags[index];
     emit showFlags(rIt->combinedFlags[index]);
     emit showPageInfo(addr, rIt->useCounts[index], QString::fromStdString(rIt->backingFile));
 }
@@ -492,7 +490,6 @@ bool MosaicWidget::eventFilter(QObject *obj, QEvent *event)
     if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseMove) {
         QMouseEvent *me = static_cast<QMouseEvent *>(event);
         if (me->buttons() & Qt::LeftButton) {
-            qDebug() << "......................." << me->pos() << me->globalPos() << me->buttons();
             printPageFlagsAtPos(me->pos());
             return true;
         }
