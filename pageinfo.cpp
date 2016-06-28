@@ -324,11 +324,11 @@ PageInfo::PageInfo(uint pid)
 
     // this should be a no-op, but why not make sure... it make little performance difference.
     sort(m_mappedRegions.begin(), m_mappedRegions.end());
-
+#ifndef NDEBUG
     for (const MappedRegion &mappedRegion : m_mappedRegions) {
         assert(mappedRegion.start < mappedRegion.end);
     }
-
+#endif
     // ### regions can sometimes overlap(!), presumably due to data races in the kernel when watching
     // a running process. Just assign any overlapping area to the first region to "claim" it, i.e. the
     // one with the smallest start address.

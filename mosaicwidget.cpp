@@ -262,10 +262,11 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
         m_mosaicWidget.adjustSize();
         return;
     }
-
+#ifndef NDEBUG
     for (const MappedRegion &mappedRegion : regions) {
         assert(mappedRegion.end >= mappedRegion.start); // == unfortunately happens sometimes
     }
+#endif
     for (size_t i = 1; i < regions.size(); i++) {
         if (regions[i].start < regions[i - 1].end) {
             qDebug() << "ranges.." << QString("%1").arg(regions[i - 1].start, 0, 16)
