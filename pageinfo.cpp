@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cinttypes>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -52,7 +53,7 @@ static vector<MappedRegionInternal> readMappedRegions(uint pid)
         char filename[PATH_MAX];
         filename[0] = '\0';
 
-        sscanf(mapLine.c_str(), "%lx-%lx %*4s %*x %*5s %*d %s",
+        sscanf(mapLine.c_str(), "%" SCNx64 "-%" SCNx64 " %*4s %*x %*5s %*d %s",
                &region.start, &region.end, filename);
         region.backingFile = string(filename);
 
