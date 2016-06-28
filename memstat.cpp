@@ -170,7 +170,7 @@ int main(int argc, char *argv[])
                 if (ser.second == 0) {
                     break;
                 }
-                if (write(connFd, ser.first, ser.second) < ser.second) {
+                if (write(connFd, ser.first, ser.second) < ssize_t(ser.second)) {
                     break;
                 }
             }

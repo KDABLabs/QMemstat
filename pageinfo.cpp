@@ -52,7 +52,7 @@ static vector<MappedRegionInternal> readMappedRegions(uint pid)
         char filename[PATH_MAX];
         filename[0] = '\0';
 
-        sscanf(mapLine.c_str(), "%lx-%lx %*4s %*lx %*5s %*ld %s",
+        sscanf(mapLine.c_str(), "%lx-%lx %*4s %*x %*5s %*d %s",
                &region.start, &region.end, filename);
         region.backingFile = string(filename);
 
@@ -92,7 +92,7 @@ static vector<uint64_t> readPagemap(uint pid, vector<MappedRegionInternal> *mapp
                 (region.end - region.start) / PageInfo::pageSize * pageFlagsSize,
                 region.start / PageInfo::pageSize * pageFlagsSize);
 
-        for (int i = 0; i < pageCount; i++) {
+        for (size_t i = 0; i < pageCount; i++) {
             const uint64_t pageBits = region.pagemapEntries[i];
             const uint64_t pfn = pfnForPagemapEntry(pageBits);
             if (pfn) {
@@ -331,7 +331,7 @@ PageInfo::PageInfo(uint pid)
     // ### regions can sometimes overlap(!), presumably due to data races in the kernel when watching
     // a running process. Just assign any overlapping area to the first region to "claim" it, i.e. the
     // one with the smallest start address.
-    for (int i = 1; i < m_mappedRegions.size(); i++) {
+    for (size_t i = 1; i < m_mappedRegions.size(); i++) {
         if (m_mappedRegions[i].start < m_mappedRegions[i - 1].end) {
             cout << "correcting " << hex << m_mappedRegions[i - 1].start << " " << hex << m_mappedRegions[i - 1].end << " "
                                   << m_mappedRegions[i].start << " " << hex << m_mappedRegions[i].end << endl;

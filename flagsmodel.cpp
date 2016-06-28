@@ -45,7 +45,7 @@ static const char *pageFlagNames[pageFlagCount] = {
 FlagsModel::FlagsModel()
    : m_bitFlags(0)
 {
-    for (int i = 0; i < pageFlagCount; i++) {
+    for (uint i = 0; i < pageFlagCount; i++) {
         if (pageFlagNames[i]) {
             m_flagRemapping.append(i);
             m_flagNames.append(QString::fromLatin1(pageFlagNames[i]));
@@ -83,7 +83,7 @@ QVariant FlagsModel::data(const QModelIndex &index, int role) const
     return QVariant();
 }
 
-Qt::ItemFlags FlagsModel::flags(const QModelIndex &index) const
+Qt::ItemFlags FlagsModel::flags(const QModelIndex &/* index */) const
 {
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
 }

@@ -88,17 +88,17 @@ bool PageInfoReader::addData(const QByteArray &data)
     bool ret = false;
     // is not guaranteed that there is one or less dataset per chunk of data received, so keep looping
     while (true) {
-        if (m_length < 0 && m_buffer.length() >= sizeof(size_t)) {
+        if (m_length < 0 && size_t(m_buffer.length()) >= sizeof(size_t)) {
             m_length = *reinterpret_cast<const uint64_t *>(m_buffer.constData());
         }
-        if (m_length >= 0 && m_buffer.length() >= m_length + sizeof(size_t)) {
+        if (m_length >= 0 && size_t(m_buffer.length()) >= m_length + sizeof(size_t)) {
             ret = true;
             m_mappedRegions.clear();
 
             const size_t endPos = m_length + sizeof(m_length);
             const char *buf = m_buffer.constData();
 
-            for (int pos = sizeof(size_t); pos < endPos; ) {
+            for (size_t pos = sizeof(size_t); pos < endPos; ) {
                 MappedRegion mr;
                 mr.start = *reinterpret_cast<const uint64_t *>(buf + pos);
                 pos += sizeof(uint64_t);
@@ -154,7 +154,7 @@ public:
     ColorCache()
        : m_cachedColor(0)
     {
-        for (int i = 0; i < s_pixelsPerTile * s_pixelsPerTile; i++) {
+        for (uint i = 0; i < s_pixelsPerTile * s_pixelsPerTile; i++) {
             m_colorCache[i] = 0;
         }
     }
@@ -176,7 +176,7 @@ void ColorCache::maybeUpdateColors(const QColor &color)
     }
     m_cachedColor = color.rgb();
     QColor c = color;
-    for (int i = 0; i < s_pixelsPerTile * s_pixelsPerTile; i++) {
+    for (uint i = 0; i < s_pixelsPerTile * s_pixelsPerTile; i++) {
         m_colorCache[i] = c.rgb();
         c = c.darker(115);
     }
@@ -250,7 +250,7 @@ void MosaicWidget::socketError()
 
 void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
 {
-    qint64 elapsed = m_updateIntervalWatch.restart();
+    //qint64 elapsed = m_updateIntervalWatch.restart();
     //qDebug() << " >> frame interval" << elapsed << "milliseconds";
 
     m_regions = regions;
@@ -266,7 +266,7 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
     for (const MappedRegion &mappedRegion : regions) {
         assert(mappedRegion.end >= mappedRegion.start); // == unfortunately happens sometimes
     }
-    for (int i = 1; i < regions.size(); i++) {
+    for (size_t i = 1; i < regions.size(); i++) {
         if (regions[i].start < regions[i - 1].end) {
             qDebug() << "ranges.." << QString("%1").arg(regions[i - 1].start, 0, 16)
                                    << QString("%1").arg(regions[i - 1].end, 0, 16)
@@ -277,10 +277,9 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
         assert(regions[i].start >= regions[i - 1].end);
     }
 
-
-    const quint64 totalRange = regions.back().end - regions.front().start;
-
+    //const quint64 totalRange = regions.back().end - regions.front().start;
     //qDebug() << "Address range covered (in pages) is" << totalRange / PageInfo::pageSize;
+
     quint64 mappedSpace = 0;
     for (const MappedRegion &r : regions) {
         mappedSpace += r.end - r.start;
@@ -305,11 +304,14 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
         largeRegions.push_back(largeRegion);
     }
 
-    //qDebug() << "number of large regions in the address space is" << largeRegions.size();
+#if 0
+    // for performance tuning...
+    qDebug() << "number of large regions in the address space is" << largeRegions.size();
     for (auto &r : largeRegions) {
         // hex output...
-        // qDebug() << "region" << QString("%1").arg(r.first, 0, 16) << QString("%1").arg(r.second, 0, 16);
+        qDebug() << "region" << QString("%1").arg(r.first, 0, 16) << QString("%1").arg(r.second, 0, 16);
     }
+#endif
 
     static const uint tilesPerSeparator = 2;
 
@@ -354,14 +356,9 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
 
         for ( ;region->end <= largeRegion.second; region = &regions[iMappedRegion]) {
             assert(iMappedRegion < regions.size());
-
-            quint64 pagesInRegion = (region->end - region->start) / PageInfo::pageSize;
-            assert(iMappedRegion >= 0);
             assert(region->end >= region->start);
+
             size_t iPage = 0;
-            // when to stop painting the current column:
-            // - iPage >= pagesInRegion
-            // - column >= s_columnCount
             while (iPage < region->useCounts.size()) {
                 const size_t endColumn = qMin(column + region->useCounts.size() - iPage, size_t(s_columnCount));
                 //qDebug() << "painting region" << column << endColumn;
@@ -434,8 +431,8 @@ void MosaicWidget::updatePageInfo(const vector<MappedRegion> &regions)
         assert(column == 0);
         // draw separator line; we avoid a line after the last largeRegion via the "&& y < rowCount"
         // condition and decreasing rowCount by the height (thickness) of a line.
-        for (int y = row; y < row + tilesPerSeparator && y < rowCount; y++) {
-            for (int x = 0 ; x < s_columnCount; x++) {
+        for (uint y = row; y < row + tilesPerSeparator && y < rowCount; y++) {
+            for (uint x = 0 ; x < s_columnCount; x++) {
                 cc.paintTile(&pixels, x, y, s_pixelsPerTile, colorBlack);
             }
         }

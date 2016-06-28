@@ -130,7 +130,7 @@ pair<const char*, size_t> PageInfoSerializer::serializeMore()
     // note that we need to stop if we went through an iteration that didn't find enough room for the current
     // member to write, but also did not fill the buffer completely
     bool wrote = true;
-    while (wrote && m_region < m_mappedRegions.size() && bufPos < chunkSize()) {
+    while (wrote && size_t(m_region) < m_mappedRegions.size() && bufPos < chunkSize()) {
         wrote = false;
         const MappedRegion &mr = m_mappedRegions[m_region];
 
