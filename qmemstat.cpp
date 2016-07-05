@@ -17,7 +17,7 @@ using namespace std;
 static void printUsage()
 {
     cerr << "Usage: qmemstat <pid>/<process-name>\n"
-         << "       qmemstat --server <host> [<port>]\n";
+         << "       qmemstat --client <host> [<port>]\n";
 }
 
 int main(int argc, char *argv[])
@@ -31,7 +31,7 @@ int main(int argc, char *argv[])
     QByteArray host;
     uint port = defaultPort;
 
-    if (QByteArray(argv[1]) != QByteArray("--server")) {
+    if (QByteArray(argv[1]) != QByteArray("--client")) {
         if (argc != 2) {
             printUsage();
             return -1;
@@ -75,7 +75,7 @@ int main(int argc, char *argv[])
         cerr << "local mode.\n";
         mainWindow = new MainWindow(pid);
     } else {
-        cerr << "server mode.\n";
+        cerr << "client mode.\n";
         mainWindow = new MainWindow(host, port);
     }
     mainWindow->show();

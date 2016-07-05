@@ -123,7 +123,7 @@ int main(int argc, char *argv[])
         cerr << "local mode.\n";
         PageInfo pageInfo(pid);
         if (pageInfo.mappedRegions().empty()) {
-            cerr << "Could not read page information. Are you root?\n";
+            cerr << "Could not read page information. Maybe you are not root?\n";
             return 1;
         }
         printSummary(pageInfo);
