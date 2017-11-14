@@ -79,7 +79,7 @@ QString printablePageFlags(uint32_t flags)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-static const uint s_pixelsPerTile = 2;
+static const uint s_pixelsPerTile = 4;
 static const uint s_columnCount = 512;
 
 bool PageInfoReader::addData(const QByteArray &data)
@@ -191,7 +191,7 @@ void ColorCache::paintTile(Rgb32PixelAccess *img, uint x, uint y, uint tileSize,
     uint colorIndex = 0;
     for (x = x * tileSize ; x < xEnd; x++) {
         for (y = yStart ; y < yEnd; y++) {
-            img->setPixel(x, y, m_colorCache[colorIndex++]);
+            img->setPixel(x, y, m_colorCache[colorIndex]);
         }
     }
 }

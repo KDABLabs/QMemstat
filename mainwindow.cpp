@@ -32,7 +32,7 @@ void MainWindow::init()
     mainLayout->addItem(infoLayout);
 
     m_pageInfoText = new QTextEdit();
-    m_pageInfoText->setFixedHeight(150);
+    m_pageInfoText->setFixedHeight(300);
     m_pageInfoText->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_pageInfoText->setReadOnly(true);
     m_pageInfoText->setText("Page information (click on page)\n\n"
