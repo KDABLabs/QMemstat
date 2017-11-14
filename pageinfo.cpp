@@ -53,8 +53,8 @@ static vector<MappedRegionInternal> readMappedRegions(uint pid)
         char filename[PATH_MAX];
         filename[0] = '\0';
 
-        sscanf(mapLine.c_str(), "%" SCNx64 "-%" SCNx64 " %*4s %*x %*5s %*d %s",
-               &region.start, &region.end, filename);
+        sscanf(mapLine.c_str(), "%" SCNx64 "-%" SCNx64 " %*4s %*x %*5s %*d %*d %s",     
+            &region.start, &region.end, filename);
         region.backingFile = string(filename);
 
         ret.push_back(region);
