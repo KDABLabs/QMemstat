@@ -15,6 +15,7 @@ add_executable(memstat
                memstat.cpp
                processinfo.cpp
                pageinfo.cpp)
+install(TARGETS memstat RUNTIME DESTINATION bin)
 
 find_package(Qt5Core)
 if (Qt5Core_FOUND)
@@ -27,4 +28,5 @@ if (Qt5Core_FOUND)
                 mosaicwidget.cpp
                 mainwindow.cpp)
     target_link_libraries(qmemstat Qt5::Widgets Qt5::Network)
+    install(TARGETS qmemstat RUNTIME DESTINATION bin)
 endif()
