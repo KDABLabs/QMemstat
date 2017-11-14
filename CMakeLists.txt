@@ -1,5 +1,7 @@
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 3.0)
 project(memstat)
+
+set(CMAKE_AUTOMOC ON)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x -D_LARGEFILE64_SOURCE")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
@@ -16,16 +18,13 @@ add_executable(memstat
 
 find_package(Qt5Core)
 if (Qt5Core_FOUND)
-    find_package(Qt5 NO_MODULE REQUIRED COMPONENTS Gui Widgets Network)
-    qt5_wrap_cpp(qmemstat_MOC flagsmodel.h mosaicwidget.h mainwindow.h)
+    find_package(Qt5 CONFIG REQUIRED COMPONENTS Gui Widgets Network)
     add_executable(qmemstat
                 qmemstat.cpp
                 processinfo.cpp
                 pageinfo.cpp
                 flagsmodel.cpp
                 mosaicwidget.cpp
-                mainwindow.cpp
-                ${qmemstat_MOC})
-    target_link_libraries(qmemstat ${QT_LIBRARIES})
-    qt5_use_modules(qmemstat Widgets Network)
+                mainwindow.cpp)
+    target_link_libraries(qmemstat Qt5::Widgets Qt5::Network)
 endif()
