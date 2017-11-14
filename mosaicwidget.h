@@ -63,7 +63,7 @@ private slots:
     void socketError();
 
 protected:
-    bool eventFilter(QObject *, QEvent *);
+    bool eventFilter(QObject *, QEvent *) override;
 
 private slots:
     void localUpdateTimeout();
