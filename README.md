@@ -1,23 +1,26 @@
-What is this?
+**QMemstat**
 
-memstat is a tool to inspect the address space of a process.
+
+***
+**QMemstat** is a tool to **inspect the address space of a process.**
 
 The Linux kernel exposes quite detailed information about the memory pages
 that processes use, and information about the pages themselves, which can
 be put together to get detailed information about a given process.
-memstat uses this information from the kernel and shows it in a more
+qmemstat uses this information from the kernel and shows it in a more
 convenient format.
 Since the kernel interfaces used are root-only for security reasons,
-memstat needs to run as root, or at least a "server" needs to run as root
+qmemstat needs to run as root, or at least a "server" needs to run as root
 for qmemstat.
 
-memstat contains two related tools:
+***
+QMemstat contains two related tools:
 
-memstat:
+**memstat:**
 
 Command-line tool. It must be run as root.
 memstat has two mode:
-- diplay memory use information: memstat <pid>|<process-name>
+  - display memory use information: memstat <pid>|<process-name>
   outputs the following three numbers:
   - VSZ (virtual set size): the size of the address space of the process
   - RSS (resident set size): the size of physical memory in the address
@@ -29,7 +32,7 @@ memstat has two mode:
   continuously grabs address space information and provides
   it to qmemstat (see below).
 
-qmemstat:
+**qmemstat:**
 
 GUI tool which shows information about a process's address space, and
 which updates the information continuously.
