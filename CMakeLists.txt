@@ -14,13 +14,10 @@ add_executable(memstat
                processinfo.cpp
                pageinfo.cpp)
 
-find_package(Qt4)
-if (Qt4_FOUND)
-    set(QT_USE_QTNETWORK TRUE)
-    include(${QT_USE_FILE})
-
-    add_definitions(${QT_DEFINITIONS})
-    qt4_wrap_cpp(qmemstat_MOC flagsmodel.h mosaicwidget.h mainwindow.h)
+find_package(Qt5Core)
+if (Qt5Core_FOUND)
+    find_package(Qt5 NO_MODULE REQUIRED COMPONENTS Gui Widgets Network)
+    qt5_wrap_cpp(qmemstat_MOC flagsmodel.h mosaicwidget.h mainwindow.h)
     add_executable(qmemstat
                 qmemstat.cpp
                 processinfo.cpp
@@ -30,4 +27,5 @@ if (Qt4_FOUND)
                 mainwindow.cpp
                 ${qmemstat_MOC})
     target_link_libraries(qmemstat ${QT_LIBRARIES})
+    qt5_use_modules(qmemstat Widgets Network)
 endif()
